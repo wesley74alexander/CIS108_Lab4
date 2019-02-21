@@ -4,91 +4,204 @@
   Author:		Kory William Herzinger
   Description:	Lab Assignment #4 / Exercise #1
 				Security System
-  Purpose:		Implements the security alarm IoT device
+  Purpose:		Implements the smart home security system
 */
 
+#include <iostream>
+
+#include "SecuritySystem.h"
+
+#include "DoorLock.h"
+#include "MobileAppInterface.h"
 #include "SecurityAlarm.h"
+#include "VideoDoorbell.h"
+#include "WindowSensor.h"
 
-#define OUTPUT_EVENTS_TO_CONSOLE
+using namespace std;
+using namespace SecuritySystem;
 
-#ifdef OUTPUT_EVENTS_TO_CONSOLE
-	#include <iostream>
-#endif
+const std::string SECURE_PIN_CODE = "5297";
+const char* ALLOW_ACCESS [] = {
+	"Steve Jobs",
+	"Jeff Bezos"
+};
 
-namespace SecurityAlarm
+bool access_granted = false;
+bool allowed_person_inside = false;
+
+bool isPersonAllowed (std::string person)
 {
+	bool is_allowed = false;
 
-	SecurityAlarmEventHandler securityAlarmEventHandler = nullptr;
-
-	bool alarmEnabled = false;
-	bool isAlarming = false;
-
-	// Initializes the security alarm
-	void initializeSecurityAlarm (SecurityAlarmEventHandler event_handler)
+	for (int x = 0; x < (sizeof (ALLOW_ACCESS) / sizeof (char*)); x++)
 	{
-		securityAlarmEventHandler = event_handler;
-	}
-
-	// Enables the security alarm
-	void enableAlarm ()
-	{
-		if (!alarmEnabled)
+		if (person == ALLOW_ACCESS[x])
 		{
-			alarmEnabled = true;
-
-			#ifdef OUTPUT_EVENTS_TO_CONSOLE
-				std::cout << "[SecurityAlarm] The alarm is enabled" << std::endl;
-			#endif
-
-			securityAlarmEventHandler (SecurityAlarmEvent::ALARM_ENABLED);
+			is_allowed = true;
+			break;
 		}
 	}
 
-	// Disables the security alarm
-	void disableAlarm ()
+	return is_allowed;
+}
+
+// Handles events from the smart door lock IoT device
+void ssDoorLockEventHandler (DoorLock::DoorLockEvent event, std::string pin_code)
+{
+	// NOTE: The pin_code is only valid for the PIN_CODE_ENTERED event
+
+	switch (event)
 	{
-		if (alarmEnabled)
+		case DoorLock::DoorLockEvent::DOOR_LOCKED:
 		{
-			alarmEnabled = false;
+		} break;
 
-			#ifdef OUTPUT_EVENTS_TO_CONSOLE
-				std::cout << "[SecurityAlarm] The alarm is disabled" << std::endl;
-			#endif
+		case DoorLock::DoorLockEvent::DOOR_UNLOCKED:
+		{
+		} break;
 
-			securityAlarmEventHandler (SecurityAlarmEvent::ALARM_DISABLED);
-		}
+		case DoorLock::DoorLockEvent::DOOR_OPENED:
+		{
+			if (allowed_person_inside)
+			{
+				// it appears the person is leaving
+				allowed_person_inside = false;
+			}
+			else
+			{
+				if (access_granted)
+				{
+					// access was granted to this person
+					allowed_person_inside = true;
+				}
+				else
+				{
+					// access was NOT granted to this person
+					SecurityAlarm::triggerAlarm ("true");
+				}
+			}
+		} break;
+
+		case DoorLock::DoorLockEvent::DOOR_CLOSED:
+		{
+			access_granted = false;
+			DoorLock::lockDoor ();
+		} break;
+
+		case DoorLock::DoorLockEvent::PIN_CODE_ENTERED:
+		{
+			if (pin_code == SECURE_PIN_CODE)
+			{
+				access_granted = true;
+				DoorLock::unlockDoor ();
+			}
+		} break;
 	}
+}
 
-	// Triggers the security alarm and optionally notifies the authorities
-	void triggerAlarm (bool notify_authorities)
+// Handles events from the smart video doorbell IoT device
+void ssVideoDoorbellEventHandler (VideoDoorbell::VideoDoorbellEvent event, std::string person_at_door)
+{
+	// NOTE: The person_at_door is only valid for the SOMEONE_AT_THE_DOOR event
+
+	switch (event)
 	{
-		if (!isAlarming)
+		case VideoDoorbell::VideoDoorbellEvent::DOORBELL_RING:
 		{
-			isAlarming = true;
+			MobileAppInterface::notifyDoorbellRing ();
+		} break;
 
-			#ifdef OUTPUT_EVENTS_TO_CONSOLE
-				std::cout << "[SecurityAlarm] The alarm has been triggered: ALARM! ALARM! ALARM!" << std::endl;
-				if (notify_authorities)
-					std::cout << "[SecurityAlarm] The authorities have been notified" << std::endl;
-			#endif
+		case VideoDoorbell::VideoDoorbellEvent::SOMEONE_AT_THE_DOOR:
+		{
+			MobileAppInterface::notifyFrontDoorActivity (true, person_at_door);
 
-			securityAlarmEventHandler (SecurityAlarmEvent::ALARM_TRIGGERED);
-		}
+			if (isPersonAllowed (person_at_door))
+			{
+				access_granted = true;
+				DoorLock::unlockDoor ();
+			}
+		} break;
+
+		case VideoDoorbell::VideoDoorbellEvent::NO_ONE_AT_THE_DOOR:
+		{
+			MobileAppInterface::notifyFrontDoorActivity(false);
+		} break;
 	}
+}
 
-	// Resets the security alarm
-	void resetAlarm ()
+// Handles events from the smart security alarm IoT device
+void ssSecurityAlarmEventHandler (SecurityAlarm::SecurityAlarmEvent event)
+{
+	switch (event)
 	{
-		if (isAlarming)
+		case SecurityAlarm::SecurityAlarmEvent::ALARM_ENABLED:
 		{
-			isAlarming = false;
+		} break;
 
-			#ifdef OUTPUT_EVENTS_TO_CONSOLE
-				std::cout << "[SecurityAlarm] The alarm has been reset" << std::endl;
-			#endif
+		case SecurityAlarm::SecurityAlarmEvent::ALARM_DISABLED:
+		{
+		} break;
 
-			securityAlarmEventHandler (SecurityAlarmEvent::ALARM_RESET);
-		}
+		case SecurityAlarm::SecurityAlarmEvent::ALARM_TRIGGERED:
+		{
+		} break;
+
+		case SecurityAlarm::SecurityAlarmEvent::ALARM_RESET:
+		{
+		} break;
 	}
+}
 
+// Handles events from the smart window sensor IoT device
+void ssWindowSensorEventHandler (WindowSensor::WindowSensorEvent event)
+{
+	switch (event)
+	{
+		case WindowSensor::WindowSensorEvent::WINDOW_OPENED:
+		{
+			SecurityAlarm::triggerAlarm (true);
+		} break;
+
+		case WindowSensor::WindowSensorEvent::WINDOW_CLOSED:
+		{
+		} break;
+	}
+}
+
+// Handles events from the mobile app
+void ssMobileAppEventHandler (MobileAppInterface::MobileAppEvent event)
+{
+	switch (event)
+	{
+		case MobileAppInterface::MobileAppEvent::REQUEST_DOOR_LOCK:
+		{
+			access_granted = false;
+			DoorLock::lockDoor ();
+		} break;
+
+		case MobileAppInterface::MobileAppEvent::REQUEST_DOOR_UNLOCK:
+		{
+			access_granted = true;
+			DoorLock::unlockDoor ();
+		} break;
+	}
+}
+
+// Initializes the security system
+void SecuritySystem::initializeSecuritySystem ()
+{
+	// initialize the door lock
+	DoorLock::initializeDoorLock (ssDoorLockEventHandler);
+
+	// initialize the video doorbell
+	VideoDoorbell::initializeDoorbell (ssVideoDoorbellEventHandler);
+
+	// initialize the security alarm
+	SecurityAlarm::initializeSecurityAlarm (ssSecurityAlarmEventHandler);
+
+	// initialize the window sensor
+	WindowSensor::initializeWindowSensor (ssWindowSensorEventHandler);
+
+	// initialize the mobile app
+	MobileAppInterface::initializeMobileApp (ssMobileAppEventHandler);
 }
